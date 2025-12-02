@@ -6,8 +6,11 @@ Optimizes FeRh dot positions to maximize frequency-selective routing
 import numpy as np
 import json
 import shutil
+import os
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import List, Tuple, Callable
 
 
 class GeneticOptimizer:
@@ -283,16 +286,141 @@ def cleanup_simulation_data(sim_name):
     out_dir = Path(f"{sim_name}.out")
     if out_dir.exists():
         shutil.rmtree(out_dir)
-        print(f"Deleted {out_dir}")
     
     # Remove .mat file
     mat_file = Path(f"{sim_name}.mat")
     if mat_file.exists():
         mat_file.unlink()
-        print(f"Deleted {mat_file}")
     
     # Remove .txt script file
     txt_file = Path(f"{sim_name}.txt")
     if txt_file.exists():
         txt_file.unlink()
-        print(f"Deleted {txt_file}")
+
+
+def get_available_gpus():
+    """
+    Detect available CUDA GPUs.
+    
+    Returns
+    -------
+    n_gpus : int
+        Number of available GPUs
+    """
+    try:
+        import subprocess
+        result = subprocess.run(['nvidia-smi', '-L'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            n_gpus = len([line for line in result.stdout.strip().split('\n') if line])
+            return n_gpus
+    except:
+        pass
+    
+    # Fallback: check CUDA_VISIBLE_DEVICES
+    cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+    if cuda_visible:
+        return len(cuda_visible.split(','))
+    
+    # Default to 1 GPU if detection fails
+    return 1
+
+
+def run_simulation_on_gpu(args):
+    """
+    Worker function to run a single simulation on a specific GPU.
+    This function is called by the parallel executor.
+    
+    Parameters
+    ----------
+    args : tuple
+        (dot_positions, sim_name, gpu_id)
+    
+    Returns
+    -------
+    result : dict
+        Dictionary containing fitness score and any other metrics
+    """
+    dot_positions, sim_name, gpu_id = args
+    
+    # Set CUDA_VISIBLE_DEVICES to use only this GPU
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    
+    # Import evaluation function from worker module
+    from simulation_worker import evaluate_individual
+    
+    # Run the evaluation
+    result = evaluate_individual(dot_positions, sim_name)
+    
+    # Clean up simulation data
+    cleanup_simulation_data(sim_name)
+    
+    return result
+
+
+class ParallelEvaluator:
+    """
+    Handles parallel evaluation of population across multiple GPUs.
+    
+    Parameters
+    ----------
+    n_workers : int, optional
+        Number of parallel workers. If None, uses number of available GPUs
+    """
+    
+    def __init__(self, n_workers: int = None):
+        if n_workers is None:
+            self.n_workers = get_available_gpus()
+        else:
+            self.n_workers = n_workers
+        
+        print(f"Parallel evaluator initialized with {self.n_workers} workers")
+    
+    def evaluate_population(self, population: List[List[Tuple]], 
+                          generation: int) -> List[float]:
+        """
+        Evaluate entire population in parallel across GPUs.
+        
+        Parameters
+        ----------
+        population : list
+            List of individuals (each is list of (x,y) tuples)
+        generation : int
+            Current generation number
+        
+        Returns
+        -------
+        fitness_scores : list
+            Fitness score for each individual
+        """
+        # Prepare arguments for each simulation
+        tasks = []
+        for idx, dot_positions in enumerate(population):
+            sim_name = f"opt_gen{generation}_ind{idx}"
+            gpu_id = idx % self.n_workers  # Round-robin GPU assignment
+            tasks.append((dot_positions, sim_name, gpu_id))
+        
+        fitness_scores = [None] * len(population)
+        
+        # Run simulations in parallel
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit all tasks
+            future_to_idx = {
+                executor.submit(run_simulation_on_gpu, task): idx 
+                for idx, task in enumerate(tasks)
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    result = future.result()
+                    fitness_scores[idx] = result['fitness']
+                    print(f"  Individual {idx+1}/{len(population)} complete: "
+                          f"Fitness = {result['fitness']:.4f} "
+                          f"(GPU {idx % self.n_workers})")
+                except Exception as e:
+                    print(f"  Individual {idx+1} failed: {e}")
+                    fitness_scores[idx] = 0.0  # Assign zero fitness on failure
+        
+        return fitness_scores
