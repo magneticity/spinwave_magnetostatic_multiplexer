@@ -275,7 +275,7 @@ if soft_alpha_edges==1{{
 // Add magnetic dots above device (region 254)
 dots := cylinder(0, 0)
 if n != 0 {{
-{chr(10).join([f"    dots = dots.add((cylinder(100e-9,100e-9).transl({x:.15e}, {y:.15e}, 0)).transl(0, 0, 50e-9))" for x, y in dot_positions])}
+    {chr(10).join([f"dots = dots.add((cylinder(100e-9,100e-9).transl({x:.15e}, {y:.15e}, 0)).transl(0, 0, 50e-9))" for x, y in dot_positions]).replace(chr(10), chr(10) + "    ")}
     defregion(254, dots)
     Msat.setRegion(254, 1.145e6)
     Aex.setRegion(254, 7.5e-12)
@@ -335,16 +335,32 @@ run(T)
         
         results[freq_label] = {'top': amp_top, 'bottom': amp_bottom}
     
-    # Calculate fitness (overall selectivity score)
+    # Calculate fitness combining selectivity and total output magnitude
     f1_label = f"{fpos[0]/1e9:.2f} GHz"
     f2_label = f"{fpos[1]/1e9:.2f} GHz"
     
+    # Selectivity: how well each frequency routes to its intended output
     selectivity_top = results[f1_label]['top'] / (results[f2_label]['top'] + 1e-10)
     selectivity_bottom = results[f2_label]['bottom'] / (results[f1_label]['bottom'] + 1e-10)
-    fitness = selectivity_top * selectivity_bottom
+    selectivity_score = selectivity_top * selectivity_bottom
+    
+    # Total output magnitude: sum of correctly routed signals
+    # We want f1 (2.6 GHz) to go to top and f2 (2.8 GHz) to go to bottom
+    total_output = results[f1_label]['top'] + results[f2_label]['bottom']
+    
+    # Normalize total output by a reference value to keep it in reasonable range
+    # Use 1e-3 as approximate expected order of magnitude
+    output_magnitude_score = total_output / 1e-3
+    
+    # Combined fitness: product of selectivity and output magnitude
+    # This encourages both good routing AND strong output signals
+    fitness = selectivity_score * output_magnitude_score
     
     return {
         'fitness': fitness,
+        'selectivity_score': selectivity_score,
+        'output_magnitude_score': output_magnitude_score,
+        'total_output': total_output,
         'selectivity_top': selectivity_top,
         'selectivity_bottom': selectivity_bottom,
         'results': results
