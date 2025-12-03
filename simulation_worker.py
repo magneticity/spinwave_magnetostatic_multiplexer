@@ -309,7 +309,7 @@ run(T)
     
     # Build magnetization array and perform FFT
     M, timestamps = build_magnetization_array(fields, pattern='m')
-    maps, fpos = mag_tfft_select(M, component='z', dt=50e-12, fsel=[2.6e9, 2.8e9], 
+    maps, fpos = mag_tfft_select(M, component='y', dt=50e-12, fsel=[2.6e9, 2.8e9], 
                                  dimorder='zyx', detrend=True, window='hann', stat='amp')
     
     # Measure outputs
