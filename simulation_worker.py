@@ -228,12 +228,14 @@ n := {len(dot_positions)}
 cell_size_x := 20e-9
 cell_size_y := 20e-9
 cell_size_z := 10e-9
-SetGridsize(250, 50, 20)
+grid_size_x := 250
+grid_size_y := 50
+grid_size_z := 20
+SetGridsize(grid_size_x, grid_size_y, grid_size_z)
 SetCellsize(cell_size_x, cell_size_y, cell_size_z)
 
 //  Geometry from PNG (white=inside, black=outside)
-SetGeom(ImageShape("mumax_geometry.png"))
-saveas(geom, "geom")
+device_geom := (ImageShape("mumax_geometry.png")).sub(cuboid(cell_size_x*grid_size_x,cell_size_y*grid_size_y,cell_size_z*grid_size_z/2).transl(0, 0, cell_size_z*grid_size_z/4))
 
 //  Load regions from OVF (scalar, 1 component)
 regions.LoadFile("regions_map.ovf")
@@ -263,6 +265,9 @@ if n != 0 {{
     Aex.setRegion(254, 7.5e-12)
     alpha.setRegion(254, 0.2)
 }}
+
+SetGeom(device_geom.add(dots))
+saveas(geom, "geom")
 
 //  Input stripline (region 255) ------------------
 input_stripline := cuboid(300e-9, 0.8e-6, 100e-9).transl(-2.5e-6 + 150e-9, 0, -50e-9)
