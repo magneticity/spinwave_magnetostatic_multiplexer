@@ -8,6 +8,7 @@ from scipy.signal.windows import hann, hamming
 from subprocess import run, PIPE, STDOUT
 from glob import glob
 from os import path
+from mumax_script import build_mumax_script
 
 
 def read_mumax3_table(filename):
@@ -220,73 +221,26 @@ def evaluate_individual(dot_positions, sim_name):
     result : dict
         Dictionary with 'fitness' and other metrics
     """
-    # Generate MuMax3 script using PNG geometry and OVF regions
-    script = f"""
-n := {len(dot_positions)}
-
-//  Mesh & sizes ---------------------------------
-cell_size_x := 20e-9
-cell_size_y := 20e-9
-cell_size_z := 10e-9
-grid_size_x := 250
-grid_size_y := 50
-grid_size_z := 20
-SetGridsize(grid_size_x, grid_size_y, grid_size_z)
-SetCellsize(cell_size_x, cell_size_y, cell_size_z)
-
-//  Geometry from PNG (white=inside, black=outside)
-device_geom := (ImageShape("mumax_geometry.png")).sub(cuboid(cell_size_x*grid_size_x,cell_size_y*grid_size_y,cell_size_z*grid_size_z/2).transl(0, 0, cell_size_z*grid_size_z/4))
-
-//  Load regions from OVF (scalar, 1 component)
-regions.LoadFile("regions_map.ovf")
-
-//  Material parameters ---------------------------
-Msat = 1.4e5
-Aex  = 3.5e-12
-device_size_x := 5e-6
-device_size_y := 1e-6
-edge_alpha := 0.5
-device_alpha := 2e-4
-// Exponential alpha purely by normalized region index s=i/253
-alpha = edge_alpha
-k := -5.0
-for i:=1; i<254; i+=1{{
-    s := i/253
-    new_alpha := edge_alpha + (device_alpha - edge_alpha) * ((exp(k*s) - 1) / (exp(k) - 1))
-    alpha.setRegion(i, new_alpha)
-}}
-
-//  Dots above device as region 254 ---------------
-dots := cylinder(0, 0)
-if n != 0 {{
-    {chr(10).join([f"dots = dots.add((cylinder(100e-9,100e-9).transl({x:.15e}, {y:.15e}, 0)).transl(0, 0, 50e-9))" for x, y in dot_positions]).replace(chr(10), chr(10) + "    ")}
-    defregion(254, dots)
-    Msat.setRegion(254, 1.145e6)
-    Aex.setRegion(254, 7.5e-12)
-    alpha.setRegion(254, 0.2)
-}}
-
-SetGeom(device_geom.add(dots))
-saveas(geom, "geom")
-
-//  Input stripline (region 255) ------------------
-input_stripline := cuboid(300e-9, 0.8e-6, 100e-9).transl(-2.5e-6 + 150e-9, 0, -50e-9)
-defregion(255,input_stripline)
-
-//  Simulation parameters ------------------------
-T = 50e-9
-f1 := 2.6e9
-f2 := 2.8e9
-sample_dt := 50e-12
-m = uniform(0.02, 0.02, 1)
-B_ext = vector(0, 0, 0.2)
-autosave(m,sample_dt)
-TableAutosave(sample_dt)
-B_ext.setregion(255, vector(0, (0.1e-3)*sin(2*pi*f1*t) + (0.1e-3)*sin(2*pi*f2*t), 0.2))
-
-//  Run ------------------------------------------
-run(T)
-"""
+    # Generate MuMax3 script using shared generator
+    params = {
+        'nx': 250, 'ny': 50, 'nz': 20,
+        'dx': 20e-9, 'dy': 20e-9, 'dz': 10e-9,
+        'geom_png': 'mumax_geometry.png',
+        'regions_ovf': 'regions_map.ovf',
+        'Msat_device': 1.4e5,
+        'Aex_device': 3.5e-12,
+        'edge_alpha': 0.5,
+        'device_alpha': 2e-4,
+        'alpha_k': -5.0,
+        'stripline_x': -2.5e-6 + 150e-9,
+        'stripline_width': 300e-9,
+        'stripline_height': 0.8e-6,
+        'f1': 2.6e9, 'f2': 2.8e9,
+        'T': 50e-9, 'sample_dt': 50e-12,
+        'n_dots': len(dot_positions),
+        'dot_diameter': 100e-9,
+    }
+    script = build_mumax_script(params, dot_positions)
     
     # Run simulation
     table, fields = run_mumax3(script, name=sim_name, verbose=False)
