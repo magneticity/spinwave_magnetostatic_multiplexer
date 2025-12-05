@@ -220,59 +220,41 @@ def evaluate_individual(dot_positions, sim_name):
     result : dict
         Dictionary with 'fitness' and other metrics
     """
-    # Generate MuMax3 script
+    # Generate MuMax3 script using PNG geometry and OVF regions
     script = f"""
 n := {len(dot_positions)}
 
-//  Set up universe & geometry ------------
+//  Mesh & sizes ---------------------------------
 cell_size_x := 20e-9
 cell_size_y := 20e-9
 cell_size_z := 10e-9
-device_size_x := 5e-6
-device_size_y := 1e-6
-device_size_z := 100e-9
 SetGridsize(250, 50, 20)
 SetCellsize(cell_size_x, cell_size_y, cell_size_z)
-main_arena := cuboid(3e-6, 1e-6, 100e-9).transl(-1e-6, 0, -50e-9)
-output_corridor_top := (cuboid(2e-6, 0.3e-6, 100e-9).transl(1.5e-6, 0.35e-6, 0)).transl(0, 0, -50e-9)
-output_corridor_bottom := (cuboid(2e-6, 0.3e-6, 100e-9).transl(1.5e-6, -0.35e-6, 0)).transl(0, 0, -50e-9)
-device := (main_arena.add(output_corridor_top)).add(output_corridor_bottom)
 
-// Define material parameters -------------
+//  Geometry from PNG (white=inside, black=outside)
+SetGeom(ImageShape("mumax_geometry.png"))
+saveas(geom, "geom")
+
+//  Load regions from OVF (scalar, 1 component)
+regions.LoadFile("regions_map.ovf")
+
+//  Material parameters ---------------------------
+Msat = 1.4e5
+Aex  = 3.5e-12
+device_size_x := 5e-6
+device_size_y := 1e-6
 edge_alpha := 0.5
 device_alpha := 2e-4
-soft_alpha_edges := 1
-Msat = 1.4e5
-Aex = 3.5e-12
-
-// Exponentially decrease alpha inside the device ---
-if soft_alpha_edges==1{{
-    alpha = edge_alpha
-    delta := 250e-9
-    k := -1e7
-    a := (device_alpha - edge_alpha)/(exp(k*delta) - 1)
-    b := edge_alpha - a
-    temp_device := device
-    
-    Lx0 := device_size_x
-    Ly0 := device_size_y
-    
-    for i:=1; i<254; i+=1{{ 
-        x := delta*i/253
-        new_alpha := a*exp(k*x)+b
-        
-        scale_x := (Lx0 - 2*i*(delta/253))/(Lx0 - 2*(i-1)*(delta/253))
-        scale_y := (Ly0 - 2*i*(delta/253))/(Ly0 - 2*(i-1)*(delta/253))
-        
-        temp_device = temp_device.scale(scale_x, scale_y, 1.0)
-        defRegion(i,temp_device)
-        alpha.setRegion(i,new_alpha)
-    }}
-}} else {{
-    alpha = device_alpha 
+// Exponential alpha purely by normalized region index s=i/253
+alpha = edge_alpha
+k := -5.0
+for i:=1; i<254; i+=1{{
+    s := i/253
+    new_alpha := edge_alpha + (device_alpha - edge_alpha) * ((exp(k*s) - 1) / (exp(k) - 1))
+    alpha.setRegion(i, new_alpha)
 }}
 
-// Add magnetic dots above device (region 254)
+//  Dots above device as region 254 ---------------
 dots := cylinder(0, 0)
 if n != 0 {{
     {chr(10).join([f"dots = dots.add((cylinder(100e-9,100e-9).transl({x:.15e}, {y:.15e}, 0)).transl(0, 0, 50e-9))" for x, y in dot_positions]).replace(chr(10), chr(10) + "    ")}
@@ -280,13 +262,13 @@ if n != 0 {{
     Msat.setRegion(254, 1.145e6)
     Aex.setRegion(254, 7.5e-12)
     alpha.setRegion(254, 0.2)
-}} 
+}}
 
-// Set the geometry -----------------------
-totalgeom := device.add(dots)
-setgeom(totalgeom)
+//  Input stripline (region 255) ------------------
+input_stripline := cuboid(300e-9, 0.8e-6, 100e-9).transl(-2.5e-6 + 150e-9, 0, -50e-9)
+defregion(255,input_stripline)
 
-// Simulation parameters ------------------
+//  Simulation parameters ------------------------
 T = 50e-9
 f1 := 2.6e9
 f2 := 2.8e9
@@ -294,13 +276,10 @@ sample_dt := 50e-12
 m = uniform(0.02, 0.02, 1)
 B_ext = vector(0, 0, 0.2)
 autosave(m,sample_dt)
-
-// Input stripline (region 255) -----------
-input_stripline := cuboid(300e-9, 0.8e-6, 100e-9).transl(-2.5e-6 + 150e-9, 0, -50e-9)
-defregion(255,input_stripline)
+TableAutosave(sample_dt)
 B_ext.setregion(255, vector(0, (0.1e-3)*sin(2*pi*f1*t) + (0.1e-3)*sin(2*pi*f2*t), 0.2))
 
-// Run ------------------------------------
+//  Run ------------------------------------------
 run(T)
 """
     
