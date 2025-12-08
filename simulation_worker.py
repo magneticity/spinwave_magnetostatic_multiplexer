@@ -259,28 +259,35 @@ def evaluate_individual(dot_positions, sim_name, params):
             measurement_size, device_size_x, device_size_y
         )
         
-        results[freq_label] = {'top': amp_top, 'bottom': amp_bottom}
+        # For approximate normalisation, considers region with same size as detectors but over source position.
+        # You can probably improve this by measuring actual source region if needed. 
+        amp_source, _ = measure_region_amplitude(
+            fmap, params.get('stripline_x', -2.5e-6 + 350e-9), 0.0, 
+            measurement_size, device_size_x, device_size_y
+        )
+
+        results[freq_label] = {'top': amp_top/amp_source, 'bottom': amp_bottom/amp_source}
     
     # Calculate fitness combining selectivity and total output magnitude
     f1_label = f"{fpos[0]/1e9:.2f} GHz"
     f2_label = f"{fpos[1]/1e9:.2f} GHz"
     
     # Selectivity: how well each frequency routes to its intended output
-    selectivity_top = results[f1_label]['top'] / (results[f2_label]['top'] + 1e-10)
-    selectivity_bottom = results[f2_label]['bottom'] / (results[f1_label]['bottom'] + 1e-10)
-    selectivity_score = selectivity_top * selectivity_bottom
+    selectivity_top = results[f1_label]['top'] / (results[f1_label]['bottom'] + results[f1_label]['top'] + 1e-10)
+    selectivity_bottom = results[f2_label]['bottom'] / (results[f2_label]['bottom'] + results[f2_label]['top'] + 1e-10)
+    selectivity_score = (selectivity_top + selectivity_bottom)/2
     
     # Total output magnitude: sum of correctly routed signals
     # We want f1 (2.6 GHz) to go to top and f2 (2.8 GHz) to go to bottom
-    total_output = results[f1_label]['top'] + results[f2_label]['bottom']
+    total_output = (results[f1_label]['top'] + results[f2_label]['bottom'])*params.get('selectivity_weight', 0.5)/2
     
     # Normalize total output by a reference value to keep it in reasonable range
     # Use 1e-3 as approximate expected order of magnitude
-    output_magnitude_score = total_output / 1e-3
+    output_magnitude_score = total_output * params.get('output_magnitude_weight',0.5)
     
     # Combined fitness: product of selectivity and output magnitude
     # This encourages both good routing AND strong output signals
-    fitness = selectivity_score * output_magnitude_score
+    fitness = selectivity_score + output_magnitude_score
     
     return {
         'fitness': fitness,
