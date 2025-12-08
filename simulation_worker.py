@@ -204,7 +204,7 @@ def measure_region_amplitude(map_3d, center_x, center_y, size, device_size_x, de
     return total_amplitude, (ix_min, ix_max, iy_min, iy_max)
 
 
-def evaluate_individual(dot_positions, sim_name):
+def evaluate_individual(dot_positions, sim_name, params):
     """
     Evaluate a single individual (set of dot positions).
     This function runs the simulation and calculates fitness.
@@ -221,25 +221,9 @@ def evaluate_individual(dot_positions, sim_name):
     result : dict
         Dictionary with 'fitness' and other metrics
     """
-    # Generate MuMax3 script using shared generator
-    params = {
-        'nx': 250, 'ny': 50, 'nz': 20,
-        'dx': 20e-9, 'dy': 20e-9, 'dz': 10e-9,
-        'geom_png': 'mumax_geometry.png',
-        'regions_ovf': 'regions_map.ovf',
-        'Msat_device': 1.4e5,
-        'Aex_device': 3.5e-12,
-        'edge_alpha': 0.5,
-        'device_alpha': 2e-4,
-        'alpha_k': -5.0,
-        'stripline_x': -2.5e-6 + 150e-9,
-        'stripline_width': 300e-9,
-        'stripline_height': 0.8e-6,
-        'f1': 2.6e9, 'f2': 2.8e9,
-        'T': 50e-9, 'sample_dt': 50e-12,
-        'n_dots': len(dot_positions),
-        'dot_diameter': 100e-9,
-    }
+    # Ensure n_dots matches provided positions
+    params = dict(params)
+    params['n_dots'] = len(dot_positions)
     script = build_mumax_script(params, dot_positions)
     
     # Run simulation
@@ -247,15 +231,19 @@ def evaluate_individual(dot_positions, sim_name):
     
     # Build magnetization array and perform FFT
     M, timestamps = build_magnetization_array(fields, pattern='m')
-    maps, fpos = mag_tfft_select(M, component='y', dt=50e-12, fsel=[2.6e9, 2.8e9], 
+    maps, fpos = mag_tfft_select(M, component='y', dt=params.get('sample_dt', 50e-12), fsel=[params.get('f1', 2.6e9), params.get('f2', 2.8e9)], 
                                  dimorder='zyx', detrend=True, window='hann', stat='amp')
     
     # Measure outputs
-    measurement_size = 300e-9
-    output_top_center = (1.5e-6, 0.35e-6)
-    output_bottom_center = (1.5e-6, -0.35e-6)
-    device_size_x = 5e-6
-    device_size_y = 1e-6
+    measurement_size = params.get('detector_size', 300e-9)
+    device_size_x = params['dx'] * params['nx']
+    device_size_y = params['dy'] * params['ny']
+    right_edge_x = device_size_x / 2
+    x_shift = params.get('detector_offset_x_cells', 0) * params['dx']
+    y_shift_top = params.get('detector_top_offset_y_cells', 0) * params['dy']
+    y_shift_bottom = params.get('detector_bottom_offset_y_cells', 0) * params['dy']
+    output_top_center = (right_edge_x - 1.0e-6 + x_shift, 0.35e-6 + y_shift_top)
+    output_bottom_center = (right_edge_x - 1.0e-6 + x_shift, -0.35e-6 + y_shift_bottom)
     
     results = {}
     for i, (fmap, f) in enumerate(zip(maps, fpos)):

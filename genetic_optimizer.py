@@ -334,14 +334,14 @@ def run_simulation_on_gpu(args):
     Parameters
     ----------
     args : tuple
-        (dot_positions, sim_name, gpu_id)
+        (dot_positions, sim_name, gpu_id, params)
     
     Returns
     -------
     result : dict
         Dictionary containing fitness score and any other metrics
     """
-    dot_positions, sim_name, gpu_id = args
+    dot_positions, sim_name, gpu_id, params = args
     
     # Set CUDA_VISIBLE_DEVICES to use only this GPU
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
@@ -350,7 +350,7 @@ def run_simulation_on_gpu(args):
     from simulation_worker import evaluate_individual
     
     # Run the evaluation
-    result = evaluate_individual(dot_positions, sim_name)
+    result = evaluate_individual(dot_positions, sim_name, params)
     
     # Clean up simulation data
     cleanup_simulation_data(sim_name)
@@ -377,7 +377,7 @@ class ParallelEvaluator:
         print(f"Parallel evaluator initialized with {self.n_workers} workers")
     
     def evaluate_population(self, population: List[List[Tuple]], 
-                          generation: int) -> List[float]:
+                          generation: int, params: dict) -> List[float]:
         """
         Evaluate entire population in parallel across GPUs.
         
@@ -398,7 +398,7 @@ class ParallelEvaluator:
         for idx, dot_positions in enumerate(population):
             sim_name = f"opt_gen{generation}_ind{idx}"
             gpu_id = idx % self.n_workers  # Round-robin GPU assignment
-            tasks.append((dot_positions, sim_name, gpu_id))
+            tasks.append((dot_positions, sim_name, gpu_id, params))
         
         fitness_scores = [None] * len(population)
         
