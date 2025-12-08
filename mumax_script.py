@@ -52,7 +52,7 @@ SetGridsize({nx}, {ny}, {nz})
 SetCellsize({dx}, {dy}, {dz})
 
 // Geometry & regions
-device_geom := (ImageShape(\"{geom_png}\")).sub(cuboid(nx*dx, ny*dy, nz*dz/2).transl(0, 0, dz*nz/4))
+device_geom := (ImageShape(\"{geom_png}\")).sub(cuboid({nx}*{dx}, {ny}*{dy}, {nz}*{dz}/2).transl(0, 0, {nz}*{dz}/4))
 regions.LoadFile(\"{regions_ovf}\")
 
 // Material params
