@@ -377,7 +377,7 @@ class ParallelEvaluator:
         print(f"Parallel evaluator initialized with {self.n_workers} workers")
     
     def evaluate_population(self, population: List[List[Tuple]], 
-                          generation: int, params: dict) -> List[float]:
+                          generation: int, params: dict) -> List[dict]:
         """
         Evaluate entire population in parallel across GPUs.
         
@@ -400,7 +400,7 @@ class ParallelEvaluator:
             gpu_id = idx % self.n_workers  # Round-robin GPU assignment
             tasks.append((dot_positions, sim_name, gpu_id, params))
         
-        fitness_scores = [None] * len(population)
+        results = [None] * len(population)
         
         # Run simulations in parallel
         with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
@@ -415,12 +415,12 @@ class ParallelEvaluator:
                 idx = future_to_idx[future]
                 try:
                     result = future.result()
-                    fitness_scores[idx] = result['fitness']
+                    results[idx] = result
                     print(f"  Individual {idx+1}/{len(population)} complete: "
                           f"Fitness = {result['fitness']:.4f} "
                           f"(GPU {idx % self.n_workers})")
                 except Exception as e:
                     print(f"  Individual {idx+1} failed: {e}")
-                    fitness_scores[idx] = 0.0  # Assign zero fitness on failure
+                    results[idx] = {'fitness': 0.0, 'error': str(e)}  # Assign zero fitness on failure
         
-        return fitness_scores
+        return results

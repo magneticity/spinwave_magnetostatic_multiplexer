@@ -243,11 +243,18 @@ def evaluate_individual(dot_positions, sim_name, params):
     
     # Build stripline mask from regions map (region id 255)
     debug_regions = bool(params.get('debug_regions_map', False))
+    debug_messages = []
+    if debug_regions:
+        debug_messages.append(f"[{sim_name}] debug_regions_map=True")
     regions_map_arr = None
     for k in fields.keys():
         if k.startswith('regions_map'):
             regions_map_arr = fields[k]
             break
+    if debug_regions:
+        # Log keys snapshot to confirm what's available
+        sample_keys = ", ".join(sorted(list(fields.keys()))[:6])
+        debug_messages.append(f"[{sim_name}] fields keys sample: {sample_keys}...")
     stripline_mask = None
     if regions_map_arr is not None:
         # regions_map may have a leading component axis of size 1
@@ -261,12 +268,12 @@ def evaluate_individual(dot_positions, sim_name, params):
                 voxels = int(stripline_mask.sum())
                 total = int(stripline_mask.size)
                 if voxels == 0:
-                    print(f"[{sim_name}] Warning: regions_map found but stripline mask empty (0/{total} voxels). Check region id 255 and conversion.")
+                    debug_messages.append(f"[{sim_name}] Warning: regions_map found but stripline mask empty (0/{total} voxels). Check region id 255 and conversion.")
                 else:
-                    print(f"[{sim_name}] regions_map present; stripline voxels: {voxels}/{total}.")
+                    debug_messages.append(f"[{sim_name}] regions_map present; stripline voxels: {voxels}/{total}.")
     else:
         if debug_regions:
-            print(f"[{sim_name}] Warning: regions_map not found in fields; falling back to proxy normalization.")
+            debug_messages.append(f"[{sim_name}] Warning: regions_map not found in fields; falling back to proxy normalization.")
     
     # Measure outputs
     measurement_size = params.get('detector_size', 300e-9)
@@ -341,5 +348,6 @@ def evaluate_individual(dot_positions, sim_name, params):
         'total_output': total_output,
         'selectivity_top': selectivity_top,
         'selectivity_bottom': selectivity_bottom,
-        'results': results
+        'results': results,
+        'debug_messages': debug_messages
     }
