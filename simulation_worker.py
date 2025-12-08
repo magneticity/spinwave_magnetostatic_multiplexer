@@ -204,6 +204,13 @@ def measure_region_amplitude(map_3d, center_x, center_y, size, device_size_x, de
     return total_amplitude, (ix_min, ix_max, iy_min, iy_max)
 
 
+def measure_mask_amplitude(map_3d, mask_3d):
+    """Measure total amplitude in map_3d within boolean mask_3d (same shape)."""
+    if mask_3d.shape != map_3d.shape:
+        raise ValueError(f"Mask shape {mask_3d.shape} does not match map shape {map_3d.shape}")
+    return np.sum(np.abs(map_3d[mask_3d]))
+
+
 def evaluate_individual(dot_positions, sim_name, params):
     """
     Evaluate a single individual (set of dot positions).
@@ -234,6 +241,33 @@ def evaluate_individual(dot_positions, sim_name, params):
     maps, fpos = mag_tfft_select(M, component='y', dt=params.get('sample_dt', 50e-12), fsel=[params.get('f1', 2.6e9), params.get('f2', 2.8e9)], 
                                  dimorder='zyx', detrend=True, window='hann', stat='amp')
     
+    # Build stripline mask from regions map (region id 255)
+    debug_regions = bool(params.get('debug_regions_map', False))
+    regions_map_arr = None
+    for k in fields.keys():
+        if k.startswith('regions_map'):
+            regions_map_arr = fields[k]
+            break
+    stripline_mask = None
+    if regions_map_arr is not None:
+        # regions_map may have a leading component axis of size 1
+        if regions_map_arr.ndim == 4 and regions_map_arr.shape[0] == 1:
+            regions_map_arr = regions_map_arr[0]
+        # Ensure shape matches fmap maps (nz, ny, nx)
+        if regions_map_arr.ndim == 3:
+            # Use isclose to handle float encodings
+            stripline_mask = np.isclose(regions_map_arr, 255)
+            if debug_regions:
+                voxels = int(stripline_mask.sum())
+                total = int(stripline_mask.size)
+                if voxels == 0:
+                    print(f"[{sim_name}] Warning: regions_map found but stripline mask empty (0/{total} voxels). Check region id 255 and conversion.")
+                else:
+                    print(f"[{sim_name}] regions_map present; stripline voxels: {voxels}/{total}.")
+    else:
+        if debug_regions:
+            print(f"[{sim_name}] Warning: regions_map not found in fields; falling back to proxy normalization.")
+    
     # Measure outputs
     measurement_size = params.get('detector_size', 300e-9)
     device_size_x = params['dx'] * params['nx']
@@ -259,35 +293,46 @@ def evaluate_individual(dot_positions, sim_name, params):
             measurement_size, device_size_x, device_size_y
         )
         
-        # For approximate normalisation, considers region with same size as detectors but over source position.
-        # You can probably improve this by measuring actual source region if needed. 
-        amp_source, _ = measure_region_amplitude(
-            fmap, params.get('stripline_x', -2.5e-6 + 350e-9), 0.0, 
-            measurement_size, device_size_x, device_size_y
-        )
+        # Source normalisation from stripline mask (region 255),
+        # fall back to square proxy if mask unavailable
+        if stripline_mask is not None:
+            amp_source = measure_mask_amplitude(fmap, stripline_mask)
+        else:
+            amp_source, _ = measure_region_amplitude(
+                fmap, params.get('stripline_x', -2.5e-6 + 150e-9), 0.0,
+                measurement_size, device_size_x, device_size_y
+            )
 
-        results[freq_label] = {'top': amp_top/amp_source, 'bottom': amp_bottom/amp_source}
+        eps = params.get('epsilon', 1e-12)
+        results[freq_label] = {
+            'top': amp_top / (amp_source + eps),
+            'bottom': amp_bottom / (amp_source + eps)
+        }
     
     # Calculate fitness combining selectivity and total output magnitude
     f1_label = f"{fpos[0]/1e9:.2f} GHz"
     f2_label = f"{fpos[1]/1e9:.2f} GHz"
     
     # Selectivity: how well each frequency routes to its intended output
-    selectivity_top = results[f1_label]['top'] / (results[f1_label]['bottom'] + results[f1_label]['top'] + 1e-10)
-    selectivity_bottom = results[f2_label]['bottom'] / (results[f2_label]['bottom'] + results[f2_label]['top'] + 1e-10)
-    selectivity_score = (selectivity_top + selectivity_bottom)/2
-    
-    # Total output magnitude: sum of correctly routed signals
-    # We want f1 (2.6 GHz) to go to top and f2 (2.8 GHz) to go to bottom
-    total_output = (results[f1_label]['top'] + results[f2_label]['bottom'])*params.get('selectivity_weight', 0.5)/2
-    
-    # Normalize total output by a reference value to keep it in reasonable range
-    # Use 1e-3 as approximate expected order of magnitude
-    output_magnitude_score = total_output * params.get('output_magnitude_weight',0.5)
-    
-    # Combined fitness: product of selectivity and output magnitude
-    # This encourages both good routing AND strong output signals
-    fitness = selectivity_score + output_magnitude_score
+    denom_f1 = results[f1_label]['top'] + results[f1_label]['bottom'] + params.get('epsilon', 1e-12)
+    denom_f2 = results[f2_label]['top'] + results[f2_label]['bottom'] + params.get('epsilon', 1e-12)
+    selectivity_top = results[f1_label]['top'] / denom_f1
+    selectivity_bottom = results[f2_label]['bottom'] / denom_f2
+    selectivity_score = (selectivity_top + selectivity_bottom) / 2.0
+
+    # Output power score: average of correctly routed, input-normalized amplitudes (0..~1)
+    output_magnitude_score = (results[f1_label]['top'] + results[f2_label]['bottom']) / 2.0
+
+    # Weighted combination (weights normalized to sum to 1)
+    w_sel = float(params.get('selectivity_weight', 0.5))
+    w_pow = float(params.get('output_magnitude_weight', 0.5))
+    w_sum = w_sel + w_pow
+    if w_sum <= 0:
+        w_sel, w_pow = 0.5, 0.5
+    else:
+        w_sel, w_pow = w_sel / w_sum, w_pow / w_sum
+    fitness = w_sel * selectivity_score + w_pow * output_magnitude_score
+    total_output = output_magnitude_score
     
     return {
         'fitness': fitness,
