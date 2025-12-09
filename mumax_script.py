@@ -40,17 +40,10 @@ def build_mumax_script(params, dot_positions):
     By_amp = params.get('By_amp', 0.1e-3)
     dot_diam = params.get('dot_diameter', 100e-9)
 
-    # Build dot additions (sanitize inputs to avoid NaN/Inf breaking MuMax3 parser)
-    import math
+    # Build dot additions
     dot_lines = []
-    safe_positions = []
-    for (x, y) in dot_positions:
-        sx = 0.0 if (x is None or not math.isfinite(x)) else float(x)
-        sy = 0.0 if (y is None or not math.isfinite(y)) else float(y)
-        safe_positions.append((sx, sy))
-        dot_lines.append(
-            f"dots = dots.add((cylinder({dot_diam},{dot_diam}).transl({sx:.15e}, {sy:.15e}, 0)).transl(0, 0, 50e-9))"
-        )
+    for (x,y) in dot_positions:
+        dot_lines.append(f"dots = dots.add((cylinder({dot_diam},{dot_diam}).transl({x:.15e}, {y:.15e}, 0)).transl(0, 0, 50e-9))")
     dots_block = "\n    ".join(dot_lines) if dot_lines else ""
 
     script = f"""
