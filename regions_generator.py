@@ -32,9 +32,10 @@ def generate_regions_image(output_path='mumax_regions.png', geom_path='mumax_geo
     
     # Shape built from rectangles
     rectangles = [
-        box(-2.5, -0.5, 0.5, 0.5),   # box(minx, miny, maxx, maxy)
-        box(0.5, -0.5, 2.5, -1/6),
-        box(0.5, 1/6, 2.5, 0.5),
+        box(-1.5, -0.5, 0.5, 0.5),   # box(minx, miny, maxx, maxy) # Changed -2.5 to -2
+        box(-2.5, -13/60, -1.5, 13/60),
+        box(0.5, -0.5, 2.5, -1/15),
+        box(0.5, 1/15, 2.5, 0.5), # Changed 1/6 to 1/15
     ]
     
     shape = unary_union(rectangles)
