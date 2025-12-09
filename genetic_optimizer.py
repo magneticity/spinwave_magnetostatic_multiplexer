@@ -40,7 +40,8 @@ class GeneticOptimizer:
     def __init__(self, population_size=10, n_dots=8, 
                  x_range=(-2.4e-6, -0.1e-6), y_range=(-0.4e-6, 0.4e-6),
                  mutation_rate=0.2, mutation_std=100e-9, 
-                 crossover_rate=0.7, elite_fraction=0.2):
+                 crossover_rate=0.7, elite_fraction=0.2,
+                 use_gates=False, gate_threshold=0.5, gate_mutation_std=0.2):
         
         self.population_size = population_size
         self.n_dots = n_dots
@@ -50,9 +51,14 @@ class GeneticOptimizer:
         self.mutation_std = mutation_std
         self.crossover_rate = crossover_rate
         self.n_elite = max(1, int(population_size * elite_fraction))
+        # Variable dot count controls
+        self.use_gates = bool(use_gates)
+        self.gate_threshold = float(gate_threshold)
+        self.gate_mutation_std = float(gate_mutation_std)
         
         # Storage for current generation
-        self.population = []  # List of individuals (each is list of (x,y) tuples)
+        # Each individual is a list of (x,y,gate) tuples; gate in [0,1]
+        self.population = []
         self.fitness_scores = []  # Fitness for each individual
         self.generation = 0
         
@@ -75,11 +81,15 @@ class GeneticOptimizer:
             for _ in range(self.n_dots):
                 x = self.x_range[0] + np.random.random() * (self.x_range[1] - self.x_range[0])
                 y = self.y_range[0] + np.random.random() * (self.y_range[1] - self.y_range[0])
-                individual.append((x, y))
+                g = np.random.random() if self.use_gates else 1.0
+                individual.append((float(x), float(y), float(g)))
             self.population.append(individual)
         
         print(f"Initialized population of {self.population_size} individuals")
-        print(f"Each individual has {self.n_dots} dots")
+        if self.use_gates:
+            print(f"Each individual has up to {self.n_dots} dots (gated)")
+        else:
+            print(f"Each individual has {self.n_dots} dots")
     
     def set_fitness_scores(self, scores):
         """
@@ -123,7 +133,7 @@ class GeneticOptimizer:
         Parameters
         ----------
         parent1, parent2 : list
-            Parent individuals (lists of (x,y) tuples)
+            Parent individuals (lists of (x,y,gate) tuples)
         
         Returns
         -------
@@ -148,7 +158,7 @@ class GeneticOptimizer:
         Parameters
         ----------
         individual : list
-            Individual to mutate (list of (x,y) tuples)
+            Individual to mutate (list of (x,y,gate) tuples)
         
         Returns
         -------
@@ -156,7 +166,7 @@ class GeneticOptimizer:
             Mutated individual
         """
         mutated = []
-        for x, y in individual:
+        for x, y, g in individual:
             if np.random.random() < self.mutation_rate:
                 # Add Gaussian noise to position
                 x_new = x + np.random.normal(0, self.mutation_std)
@@ -165,10 +175,19 @@ class GeneticOptimizer:
                 # Clip to valid range
                 x_new = np.clip(x_new, self.x_range[0], self.x_range[1])
                 y_new = np.clip(y_new, self.y_range[0], self.y_range[1])
-                
-                mutated.append((x_new, y_new))
+                # Optionally mutate gate
+                if self.use_gates and np.random.random() < self.mutation_rate:
+                    g_new = np.clip(g + np.random.normal(0, self.gate_mutation_std), 0.0, 1.0)
+                else:
+                    g_new = g
+                mutated.append((float(x_new), float(y_new), float(g_new)))
             else:
-                mutated.append((x, y))
+                # Small chance to toggle gate even without position mutation
+                if self.use_gates and np.random.random() < (self.mutation_rate * 0.5):
+                    g_new = np.clip(g + np.random.normal(0, self.gate_mutation_std), 0.0, 1.0)
+                else:
+                    g_new = g
+                mutated.append((float(x), float(y), float(g_new)))
         
         return mutated
     
@@ -212,16 +231,20 @@ class GeneticOptimizer:
         print(f"  New offspring:   {self.population_size - self.n_elite}")
     
     def get_current_population(self):
-        """Return current population as list of dot position lists."""
-        return [individual.copy() for individual in self.population]
+        """Return current population as list of ACTIVE dot position lists."""
+        active_pop = []
+        for individual in self.population:
+            active = [(x, y) for (x, y, g) in individual if g >= self.gate_threshold]
+            active_pop.append(active)
+        return active_pop
     
     def get_best_individual(self):
-        """Return best individual from current generation."""
+        """Return best ACTIVE individual from current generation."""
         if len(self.fitness_scores) == 0:
             raise ValueError("No fitness scores available")
-        
         best_idx = np.argmax(self.fitness_scores)
-        return self.population[best_idx].copy(), self.fitness_scores[best_idx]
+        active = [(x, y) for (x, y, g) in self.population[best_idx] if g >= self.gate_threshold]
+        return active, self.fitness_scores[best_idx]
     
     def save_checkpoint(self, filepath):
         """Save optimizer state to JSON file."""
@@ -233,6 +256,7 @@ class GeneticOptimizer:
                 'generations': self.history['generations'],
                 'best_fitness': self.history['best_fitness'],
                 'mean_fitness': self.history['mean_fitness'],
+                # store active positions for best individual history
                 'best_individual': [[list(pos) for pos in ind] for ind in self.history['best_individual']]
             },
             'config': {
@@ -243,7 +267,10 @@ class GeneticOptimizer:
                 'mutation_rate': self.mutation_rate,
                 'mutation_std': self.mutation_std,
                 'crossover_rate': self.crossover_rate,
-                'n_elite': self.n_elite
+                'n_elite': self.n_elite,
+                'use_gates': self.use_gates,
+                'gate_threshold': self.gate_threshold,
+                'gate_mutation_std': self.gate_mutation_std
             },
             'timestamp': datetime.now().isoformat()
         }
@@ -259,9 +286,21 @@ class GeneticOptimizer:
             checkpoint = json.load(f)
         
         self.generation = checkpoint['generation']
-        self.population = [[tuple(pos) for pos in ind] for ind in checkpoint['population']]
+        # Load population; supports both (x,y) and (x,y,gate)
+        self.population = []
+        for ind in checkpoint['population']:
+            new_ind = []
+            for pos in ind:
+                if len(pos) == 3:
+                    x, y, g = pos
+                else:
+                    x, y = pos
+                    g = 1.0
+                new_ind.append((float(x), float(y), float(g)))
+            self.population.append(new_ind)
         self.fitness_scores = np.array(checkpoint['fitness_scores'])
         
+        # Best individual history may store positions only; keep as-is
         self.history = {
             'generations': checkpoint['history']['generations'],
             'best_fitness': checkpoint['history']['best_fitness'],
