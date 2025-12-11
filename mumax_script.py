@@ -30,6 +30,7 @@ def build_mumax_script(params, dot_positions):
     alpha_dot = params.get('alpha_dot', 0.2)
     alpha_k = params.get('alpha_k', -5.0)
     stripline_x = params.get('stripline_x', -2.5e-6 + 150e-9)
+    stripline_y = params.get('stripline_y', 0)
     stripline_width = params.get('stripline_width', 300e-9)
     stripline_height = params.get('stripline_height', 0.8e-6)
     f1 = params.get('f1', 2.6e9)
@@ -79,7 +80,7 @@ if {len(dot_positions)} != 0 {{
 }}
 
 // Input stripline region 255
-input_stripline := cuboid({stripline_width}, {stripline_height}, {dz* nz}).transl({stripline_x}, 0, {-dz* nz/2})
+input_stripline := cuboid({stripline_width}, {stripline_height}, {dz* nz}).transl({stripline_x}, {stripline_y}, {-dz* nz/2})
 defregion(255,input_stripline)
 
 setgeom(device_geom.add(dots))

@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw
 
 
 def generate_regions_image(output_path='mumax_regions.png', geom_path='mumax_geometry.png',
-                          num_insets=253, total_inset_distance=0.15, pixel_size=0.02, verbose=False):
+                          num_insets=253, total_inset_distance=0.08, pixel_size=0.02, verbose=False):
     """
     Generate greyscale images for MuMax3: one for geometry, one for regions.
     
@@ -32,10 +32,11 @@ def generate_regions_image(output_path='mumax_regions.png', geom_path='mumax_geo
     
     # Shape built from rectangles
     rectangles = [
-        box(-1.5, -0.5, 0.5, 0.5),   # box(minx, miny, maxx, maxy) # Changed -2.5 to -2
-        box(-2.5, -13/60, -1.5, 13/60),
-        box(0.5, -0.5, 2.5, -1/15),
-        box(0.5, 1/15, 2.5, 0.5), # Changed 1/6 to 1/15
+        box(-1.5, -0.5, 0.5, 0.5),   # box(minx, miny, maxx, maxy) # Main arena 
+        #box(-2.5, -13/60, -1.5, 13/60), # Input corridor 
+        box(-2.5, -1/15, -1.5, 0.5), # Input corridor (shifted to top)
+        box(0.5, -0.5, 2.5, -1/15), # Output corridor (bottom)
+        box(0.5, 1/15, 2.5, 0.5), # Output corridor (top)
     ]
     
     shape = unary_union(rectangles)
